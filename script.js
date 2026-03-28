@@ -131,23 +131,89 @@ const RESULT_TYPES = [
   }
 ];
 
-// ===== MOCK LEADERBOARD DATA =====
-const MOCK_LEADERBOARD = [
-  { name: "Tolu", count: 24 },
-  { name: "Chidera", count: 18 },
-  { name: "Favour", count: 15 },
-  { name: "Emeka", count: 12 },
-  { name: "Blessing", count: 9 },
-  { name: "Kunle", count: 7 },
-  { name: "Aisha", count: 5 },
-  { name: "David", count: 4 },
-  { name: "Grace", count: 3 }
-];
+// ===== SUPABASE CLIENT =====
+const SUPABASE_URL = 'https://kwgretcswdjhszhnfgaw.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_NZ2VWfY2XWG0U1aQbx926g_H24skxZb';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// ===== DATA LAYER (abstracted for future backend swap) =====
+// Generate a persistent device ID to identify this browser
+function getDeviceId() {
+  let id = localStorage.getItem('bk_device_id');
+  if (!id) {
+    id = 'dev_' + crypto.randomUUID();
+    localStorage.setItem('bk_device_id', id);
+  }
+  return id;
+}
+
+// ===== DATA LAYER (Supabase-backed with localStorage cache) =====
 const DataStore = {
-  saveScore(score) {
+  _cache: {},
+
+  // --- Player record management ---
+  async ensurePlayer() {
+    const deviceId = getDeviceId();
+    // Check if player exists in Supabase
+    const { data } = await supabase
+      .from('players')
+      .select('*')
+      .eq('device_id', deviceId)
+      .single();
+
+    if (data) {
+      this._cache = data;
+      // Sync to localStorage for offline fallback
+      this._syncToLocal(data);
+      return data;
+    }
+
+    // Create new player
+    const referralCode = generateReferralCode();
+    const { data: newPlayer, error } = await supabase
+      .from('players')
+      .insert({
+        device_id: deviceId,
+        referral_code: referralCode
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating player:', error);
+      // Fallback to localStorage
+      localStorage.setItem('bk_referralCode', referralCode);
+      return null;
+    }
+
+    this._cache = newPlayer;
+    this._syncToLocal(newPlayer);
+    return newPlayer;
+  },
+
+  _syncToLocal(data) {
+    if (data.score != null) localStorage.setItem('bk_score', JSON.stringify(data.score));
+    if (data.display_name) localStorage.setItem('bk_displayName', data.display_name);
+    if (data.referral_code) localStorage.setItem('bk_referralCode', data.referral_code);
+    if (data.result_type) localStorage.setItem('bk_resultType', data.result_type);
+    if (data.quiz_completed) localStorage.setItem('bk_quizCompleted', '1');
+    localStorage.setItem('bk_referralCount', String(data.referral_count || 0));
+  },
+
+  async _updatePlayer(fields) {
+    const deviceId = getDeviceId();
+    const { error } = await supabase
+      .from('players')
+      .update({ ...fields, updated_at: new Date().toISOString() })
+      .eq('device_id', deviceId);
+
+    if (error) console.error('Update error:', error);
+    Object.assign(this._cache, fields);
+  },
+
+  // --- Score ---
+  async saveScore(score) {
     localStorage.setItem('bk_score', JSON.stringify(score));
+    await this._updatePlayer({ score });
   },
 
   getScore() {
@@ -155,22 +221,27 @@ const DataStore = {
     return data ? JSON.parse(data) : null;
   },
 
-  saveDisplayName(name) {
+  // --- Display Name ---
+  async saveDisplayName(name) {
     localStorage.setItem('bk_displayName', name);
+    await this._updatePlayer({ display_name: name });
   },
 
   getDisplayName() {
     return localStorage.getItem('bk_displayName') || '';
   },
 
+  // --- Referral Code ---
   saveReferralCode(code) {
     localStorage.setItem('bk_referralCode', code);
+    // Already saved in ensurePlayer, no extra call needed
   },
 
   getReferralCode() {
     return localStorage.getItem('bk_referralCode') || '';
   },
 
+  // --- Referred By ---
   saveReferredBy(code) {
     localStorage.setItem('bk_referredBy', code);
   },
@@ -187,43 +258,97 @@ const DataStore = {
     return localStorage.getItem('bk_referrerName') || '';
   },
 
-  incrementReferralCount() {
-    const current = this.getReferralCount();
-    localStorage.setItem('bk_referralCount', current + 1);
+  // --- Referral Count ---
+  async incrementReferralCount(referrerCode) {
+    // Increment the REFERRER's count in the database
+    const { error } = await supabase.rpc('increment_referral_count', { ref_code: referrerCode });
+    if (error) console.error('Referral increment error:', error);
   },
 
   getReferralCount() {
     return parseInt(localStorage.getItem('bk_referralCount') || '0', 10);
   },
 
-  setQuizCompleted(completed) {
+  // --- Quiz Completion ---
+  async setQuizCompleted(completed) {
     localStorage.setItem('bk_quizCompleted', completed ? '1' : '0');
+    await this._updatePlayer({ quiz_completed: completed });
   },
 
   isQuizCompleted() {
     return localStorage.getItem('bk_quizCompleted') === '1';
   },
 
-  saveResultType(typeName) {
+  // --- Result Type ---
+  async saveResultType(typeName) {
     localStorage.setItem('bk_resultType', typeName);
+    await this._updatePlayer({ result_type: typeName });
   },
 
   getResultType() {
     return localStorage.getItem('bk_resultType') || '';
   },
 
-  getLeaderboard() {
-    // Future: replace with API call
-    const userName = this.getDisplayName();
-    const userCount = this.getReferralCount();
-    const leaderboard = [...MOCK_LEADERBOARD];
+  // --- Leaderboard (REAL DATA from Supabase) ---
+  async getLeaderboard() {
+    const { data, error } = await supabase
+      .from('players')
+      .select('display_name, referral_count, referral_code')
+      .not('display_name', 'is', null)
+      .gt('referral_count', 0)
+      .order('referral_count', { ascending: false })
+      .limit(10);
 
-    if (userName) {
+    if (error || !data) {
+      console.error('Leaderboard error:', error);
+      // Fallback: just show current user
+      const userName = this.getDisplayName();
+      const userCount = this.getReferralCount();
+      return userName ? [{ name: userName, count: userCount, isCurrentUser: true }] : [];
+    }
+
+    const myCode = this.getReferralCode();
+    const leaderboard = data.map(row => ({
+      name: row.display_name,
+      count: row.referral_count,
+      isCurrentUser: row.referral_code === myCode
+    }));
+
+    // If current user has a name but isn't in top 10, add them
+    const userName = this.getDisplayName();
+    if (userName && !leaderboard.find(e => e.isCurrentUser)) {
+      const userCount = this.getReferralCount();
       leaderboard.push({ name: userName, count: userCount, isCurrentUser: true });
     }
 
-    leaderboard.sort((a, b) => b.count - a.count);
-    return leaderboard.slice(0, 10);
+    return leaderboard;
+  },
+
+  // --- Referrer lookup (find who referred this user) ---
+  async getReferrerByCode(code) {
+    const { data } = await supabase
+      .from('players')
+      .select('display_name')
+      .eq('referral_code', code)
+      .single();
+
+    return data ? data.display_name : null;
+  },
+
+  // --- Refresh own data from Supabase ---
+  async refreshFromServer() {
+    const deviceId = getDeviceId();
+    const { data } = await supabase
+      .from('players')
+      .select('*')
+      .eq('device_id', deviceId)
+      .single();
+
+    if (data) {
+      this._cache = data;
+      this._syncToLocal(data);
+    }
+    return data;
   }
 };
 
@@ -331,18 +456,20 @@ function handleOptionSelect(option, card) {
   }, 500);
 }
 
-function finishQuiz() {
+async function finishQuiz() {
   const resultType = getResultType(totalScore);
 
-  DataStore.saveScore(totalScore);
-  DataStore.saveResultType(resultType.name);
-  DataStore.setQuizCompleted(true);
+  // Save to Supabase + localStorage
+  await DataStore.saveScore(totalScore);
+  await DataStore.saveResultType(resultType.name);
+  await DataStore.setQuizCompleted(true);
 
-  // Handle referral tracking
+  // Handle referral tracking — NOW WORKS with Supabase!
   const referredBy = DataStore.getReferredBy();
   if (referredBy) {
-    // Future: send to backend to increment referrer's count
-    // For now this is a no-op since we can't update another user's localStorage
+    await DataStore.incrementReferralCount(referredBy);
+    // Also save who referred this player
+    await DataStore._updatePlayer({ referred_by: referredBy });
   }
 
   showResultScreen(totalScore, resultType);
@@ -402,7 +529,7 @@ function setupShareScreen() {
   }
 }
 
-function showShareContent(name) {
+async function showShareContent(name) {
   document.getElementById('nameInputArea').classList.add('hidden');
   document.getElementById('shareContent').classList.remove('hidden');
 
@@ -412,6 +539,9 @@ function showShareContent(name) {
     code = generateReferralCode();
     DataStore.saveReferralCode(code);
   }
+
+  // Refresh data from server to get latest referral count
+  await DataStore.refreshFromServer();
 
   const shareUrl = getSiteUrl() + '?ref=' + code;
   document.getElementById('referralLinkText').textContent = shareUrl;
@@ -434,16 +564,27 @@ function showShareContent(name) {
   };
 
   // Render mini leaderboard
-  renderLeaderboard('miniLeaderboardList', 5);
+  await renderLeaderboard('miniLeaderboardList', 5);
 }
 
 // ===== LEADERBOARD =====
-function renderLeaderboard(elementId, limit) {
+async function renderLeaderboard(elementId, limit) {
   const list = document.getElementById(elementId);
-  const data = DataStore.getLeaderboard().slice(0, limit || 10);
 
-  list.innerHTML = data.map(entry => `
+  // Show loading state
+  list.innerHTML = '<li class="leaderboard-item" style="text-align:center;opacity:0.5;">Loading...</li>';
+
+  const allData = await DataStore.getLeaderboard();
+  const data = allData.slice(0, limit || 10);
+
+  if (data.length === 0) {
+    list.innerHTML = '<li class="leaderboard-item" style="text-align:center;opacity:0.5;">No referrals yet. Be the first!</li>';
+    return;
+  }
+
+  list.innerHTML = data.map((entry, i) => `
     <li class="leaderboard-item${entry.isCurrentUser ? ' current-user' : ''}">
+      <span class="leaderboard-rank">#${i + 1}</span>
       <span class="leaderboard-name">${entry.isCurrentUser ? entry.name + ' (You)' : entry.name}</span>
       <span class="leaderboard-count">${entry.count} invite${entry.count !== 1 ? 's' : ''}</span>
     </li>
@@ -451,7 +592,10 @@ function renderLeaderboard(elementId, limit) {
 }
 
 // ===== INITIALIZATION =====
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  // Initialize player in Supabase (creates record if new)
+  await DataStore.ensurePlayer();
+
   // Start quiz
   document.getElementById('btnStart').addEventListener('click', () => {
     currentQuestion = 0;
@@ -472,10 +616,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Save name
-  document.getElementById('btnSaveName').addEventListener('click', () => {
+  document.getElementById('btnSaveName').addEventListener('click', async () => {
     const name = document.getElementById('inputName').value.trim();
     if (!name) return;
-    DataStore.saveDisplayName(name);
+    await DataStore.saveDisplayName(name);
     showShareContent(name);
   });
 
@@ -549,7 +693,11 @@ document.addEventListener('DOMContentLoaded', () => {
     DataStore.saveReferredBy(refCode);
     const noteEl = document.getElementById('referralNote');
     const nameEl = document.getElementById('referrerName');
-    nameEl.textContent = 'a friend';
+
+    // Try to look up referrer's name from Supabase
+    const referrerName = await DataStore.getReferrerByCode(refCode);
+    nameEl.textContent = referrerName || 'a friend';
+
     noteEl.classList.remove('hidden');
     window.history.replaceState({}, '', window.location.pathname);
   }
