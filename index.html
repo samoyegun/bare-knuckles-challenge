@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Bare Knuckles Challenge</title>
+  <meta name="description" content="How ready are you for marriage? Take the quiz. Find out. No Gloves. No Filters. Just Faith.">
+  <meta property="og:title" content="The Bare Knuckles Challenge">
+  <meta property="og:description" content="How ready are you for marriage? Take the quiz. Find out.">
+  <meta property="og:type" content="website">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;700;800;900&family=Playfair+Display:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=2">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
+</head>
+<body>
+  <!-- Background video -->
+  <video class="bg-video" autoplay muted loop playsinline>
+    <source src="bk-animation.mp4" type="video/mp4">
+  </video>
+
+  <!-- Grain overlay -->
+  <div class="grain-overlay"></div>
+
+  <!-- Top navigation bar (visible after quiz) -->
+  <nav class="top-nav hidden" id="topNav">
+    <button class="home-btn" id="homeBtn" aria-label="Go to home">
+      <img src="logo-white.png" alt="Bare Knuckles" class="home-logo">
+    </button>
+    <button class="leaderboard-toggle" id="leaderboardToggle" aria-label="View Leaderboard">
+      LEADERBOARD
+    </button>
+  </nav>
+
+  <!-- ===== SCREEN 1: LANDING ===== -->
+  <section class="screen active" id="screenLanding">
+    <div class="landing-logo-corner">
+      <img src="logo-purple.png" alt="Bare Knuckles Logo" class="landing-corner-logo">
+    </div>
+    <div class="landing-content">
+      <h1 class="hero-title">THE BARE<br>KNUCKLES<br>CHALLENGE</h1>
+      <p class="hero-subtitle">How ready are you for marriage?<br>Take the quiz. Find out.</p>
+      <button class="btn btn-primary btn-large pulse" id="btnStart">TAKE THE CHALLENGE</button>
+      <p class="referral-note hidden" id="referralNote">You were invited by <span id="referrerName"></span></p>
+    </div>
+  </section>
+
+  <!-- ===== SCREEN 2: QUIZ ===== -->
+  <section class="screen" id="screenQuiz">
+    <div class="quiz-container">
+      <div class="progress-bar-container">
+        <div class="progress-text"><span id="progressCurrent">1</span> of <span id="progressTotal">10</span></div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+      </div>
+      <div class="question-area" id="questionArea">
+        <!-- Questions injected by JS -->
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== SCREEN 3: RESULT ===== -->
+  <section class="screen" id="screenResult">
+    <div class="result-container">
+      <div class="result-reveal">
+        <p class="result-label">YOUR SCORE</p>
+        <div class="score-display">
+          <span class="score-number" id="scoreNumber">0</span><span class="score-total">/40</span>
+        </div>
+        <h2 class="type-name" id="typeName"></h2>
+        <p class="type-tagline" id="typeTagline"></p>
+        <p class="type-description" id="typeDescription"></p>
+      </div>
+
+      <!-- Shareable card -->
+      <div class="share-card" id="shareCard">
+        <div class="share-card-inner">
+          <div class="share-card-header">
+            <span class="share-card-title">BARE KNUCKLES</span>
+            <span class="share-card-year">2026</span>
+          </div>
+          <div class="share-card-body">
+            <!-- Photo upload area -->
+            <div id="shareCardPhoto" style="position:relative;width:80px;height:80px;margin:0 auto 16px;border-radius:50%;overflow:hidden;cursor:pointer;">
+              <div id="photoPlaceholder" style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(30,16,64,0.8);border:2px dashed rgba(168,156,200,0.5);border-radius:50%;color:rgba(168,156,200,1);gap:2px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="8" r="4"/>
+                  <path d="M20 21a8 8 0 1 0-16 0"/>
+                </svg>
+                <span style="font-family:'Archivo Black',sans-serif;font-size:0.45rem;letter-spacing:0.1em;">ADD PHOTO</span>
+              </div>
+              <img class="hidden" id="photoPreview" alt="Your photo" style="width:100%;height:100%;object-fit:cover;border-radius:50%;position:absolute;top:0;left:0;">
+            </div>
+            <p class="share-card-label">I AM</p>
+            <h3 class="share-card-type" id="shareCardType"></h3>
+            <p class="share-card-score" id="shareCardScore"></p>
+          </div>
+          <div class="share-card-footer">
+            <span>bareknuckleschallenge.com</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Share card actions -->
+      <div style="display:flex;gap:10px;margin:20px auto 32px;max-width:340px;">
+        <button id="btnDownloadCard" style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;font-family:'Archivo Black',sans-serif;font-size:0.7rem;letter-spacing:0.08em;padding:14px 12px;background:#120828;color:#F5F0E8;border:1px solid #7029CF;border-radius:6px;cursor:pointer;transition:all 0.2s ease;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          SAVE CARD
+        </button>
+        <a id="btnShareWhatsApp" target="_blank" rel="noopener noreferrer" style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;font-family:'Archivo Black',sans-serif;font-size:0.7rem;letter-spacing:0.08em;padding:14px 12px;background:#25D366;color:#fff;border:none;border-radius:6px;cursor:pointer;text-decoration:none;transition:all 0.2s ease;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+          </svg>
+          SHARE ON WHATSAPP
+        </a>
+      </div>
+
+      <div class="result-actions">
+        <a class="btn btn-primary btn-large" id="btnRegister" href="https://docs.google.com/forms/d/e/1FAIpQLScbj90c9_PIWmnh-oclJU5gfUAyl7CsT2DYXuP9a0X7XNxvfQ/viewform?usp=header" target="_blank" rel="noopener noreferrer">REGISTER FOR BARE KNUCKLES</a>
+        <button class="btn btn-secondary btn-large" id="btnChallenge">CHALLENGE A FRIEND</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== SCREEN 4: REFERRAL / SHARE ===== -->
+  <section class="screen" id="screenShare">
+    <div class="share-container">
+      <h2 class="section-title">CHALLENGE YOUR CIRCLE</h2>
+
+      <!-- Name input (shown if no name set) -->
+      <div class="name-input-area" id="nameInputArea">
+        <p class="share-prompt">First, what should we call you?</p>
+        <input type="text" class="input-name" id="inputName" placeholder="Your first name or nickname" maxlength="20" autocomplete="off">
+        <button class="btn btn-primary" id="btnSaveName">LET'S GO</button>
+      </div>
+
+      <!-- Share content (shown after name set) -->
+      <div class="share-content hidden" id="shareContent">
+        <div class="referral-stats">
+          <p class="stat-label">YOUR INVITES</p>
+          <p class="stat-number" id="inviteCount">0</p>
+        </div>
+
+        <div class="referral-link-box">
+          <p class="link-label">YOUR CHALLENGE LINK</p>
+          <div class="link-display">
+            <span id="referralLinkText" class="link-text"></span>
+            <button class="btn-copy" id="btnCopy">COPY</button>
+          </div>
+          <span class="copy-confirm hidden" id="copyConfirm">Copied!</span>
+        </div>
+
+        <div class="share-buttons">
+          <a class="btn btn-whatsapp btn-large" id="btnWhatsApp" target="_blank" rel="noopener noreferrer">
+            SHARE ON WHATSAPP
+          </a>
+        </div>
+
+        <!-- Mini leaderboard -->
+        <div class="mini-leaderboard">
+          <h3 class="leaderboard-title">TOP CHALLENGERS</h3>
+          <ol class="leaderboard-list" id="miniLeaderboardList">
+            <!-- Injected by JS -->
+          </ol>
+        </div>
+      </div>
+
+      <button class="btn btn-ghost" id="btnBackToResult">&larr; BACK TO RESULT</button>
+    </div>
+  </section>
+
+  <!-- ===== SCREEN 5: LEADERBOARD ===== -->
+  <section class="screen" id="screenLeaderboard">
+    <div class="leaderboard-container">
+      <h2 class="section-title">LEADERBOARD</h2>
+      <p class="leaderboard-subtitle">Top referrers this round</p>
+      <ol class="leaderboard-list full-leaderboard" id="fullLeaderboardList">
+        <!-- Injected by JS -->
+      </ol>
+      <button class="btn btn-ghost" id="btnCloseLeaderboard">&larr; BACK</button>
+    </div>
+  </section>
+
+  <!-- FUTURE: Bonus code input area
+  <div class="bonus-code-area">
+    <input type="text" placeholder="Enter event bonus code">
+    <button>REDEEM</button>
+  </div>
+  -->
+
+  <!-- Hidden file input for photo upload -->
+  <input type="file" accept="image/*" id="photoInput" style="position:absolute;width:0;height:0;overflow:hidden;opacity:0;pointer-events:none;">
+  <script src="script.js"></script>
+</body>
+</html>
