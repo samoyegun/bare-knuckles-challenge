@@ -134,7 +134,14 @@ const RESULT_TYPES = [
 // ===== SUPABASE CLIENT =====
 const SUPABASE_URL = 'https://kwgretcswdjhszhnfgaw.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_NZ2VWfY2XWG0U1aQbx926g_H24skxZb';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let supabase = null;
+try {
+  if (window.supabase && window.supabase.createClient) {
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+} catch (e) {
+  console.warn('Supabase failed to initialize, using localStorage only:', e);
+}
 
 // Generate a persistent device ID to identify this browser
 function getDeviceId() {
@@ -152,42 +159,56 @@ const DataStore = {
 
   // --- Player record management ---
   async ensurePlayer() {
-    const deviceId = getDeviceId();
-    // Check if player exists in Supabase
-    const { data } = await supabase
-      .from('players')
-      .select('*')
-      .eq('device_id', deviceId)
-      .single();
-
-    if (data) {
-      this._cache = data;
-      // Sync to localStorage for offline fallback
-      this._syncToLocal(data);
-      return data;
-    }
-
-    // Create new player
-    const referralCode = generateReferralCode();
-    const { data: newPlayer, error } = await supabase
-      .from('players')
-      .insert({
-        device_id: deviceId,
-        referral_code: referralCode
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error creating player:', error);
-      // Fallback to localStorage
-      localStorage.setItem('bk_referralCode', referralCode);
+    if (!supabase) {
+      // No Supabase — ensure referral code exists in localStorage
+      if (!localStorage.getItem('bk_referralCode')) {
+        localStorage.setItem('bk_referralCode', generateReferralCode());
+      }
       return null;
     }
 
-    this._cache = newPlayer;
-    this._syncToLocal(newPlayer);
-    return newPlayer;
+    try {
+      const deviceId = getDeviceId();
+      // Check if player exists in Supabase
+      const { data } = await supabase
+        .from('players')
+        .select('*')
+        .eq('device_id', deviceId)
+        .single();
+
+      if (data) {
+        this._cache = data;
+        this._syncToLocal(data);
+        return data;
+      }
+
+      // Create new player
+      const referralCode = generateReferralCode();
+      const { data: newPlayer, error } = await supabase
+        .from('players')
+        .insert({
+          device_id: deviceId,
+          referral_code: referralCode
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error creating player:', error);
+        localStorage.setItem('bk_referralCode', referralCode);
+        return null;
+      }
+
+      this._cache = newPlayer;
+      this._syncToLocal(newPlayer);
+      return newPlayer;
+    } catch (e) {
+      console.error('ensurePlayer error:', e);
+      if (!localStorage.getItem('bk_referralCode')) {
+        localStorage.setItem('bk_referralCode', generateReferralCode());
+      }
+      return null;
+    }
   },
 
   _syncToLocal(data) {
@@ -200,14 +221,18 @@ const DataStore = {
   },
 
   async _updatePlayer(fields) {
-    const deviceId = getDeviceId();
-    const { error } = await supabase
-      .from('players')
-      .update({ ...fields, updated_at: new Date().toISOString() })
-      .eq('device_id', deviceId);
-
-    if (error) console.error('Update error:', error);
     Object.assign(this._cache, fields);
+    if (!supabase) return;
+    try {
+      const deviceId = getDeviceId();
+      const { error } = await supabase
+        .from('players')
+        .update({ ...fields, updated_at: new Date().toISOString() })
+        .eq('device_id', deviceId);
+      if (error) console.error('Update error:', error);
+    } catch (e) {
+      console.error('_updatePlayer error:', e);
+    }
   },
 
   // --- Score ---
@@ -260,9 +285,13 @@ const DataStore = {
 
   // --- Referral Count ---
   async incrementReferralCount(referrerCode) {
-    // Increment the REFERRER's count in the database
-    const { error } = await supabase.rpc('increment_referral_count', { ref_code: referrerCode });
-    if (error) console.error('Referral increment error:', error);
+    if (!supabase) return;
+    try {
+      const { error } = await supabase.rpc('increment_referral_count', { ref_code: referrerCode });
+      if (error) console.error('Referral increment error:', error);
+    } catch (e) {
+      console.error('incrementReferralCount error:', e);
+    }
   },
 
   getReferralCount() {
@@ -291,64 +320,82 @@ const DataStore = {
 
   // --- Leaderboard (REAL DATA from Supabase) ---
   async getLeaderboard() {
-    const { data, error } = await supabase
-      .from('players')
-      .select('display_name, referral_count, referral_code')
-      .not('display_name', 'is', null)
-      .gt('referral_count', 0)
-      .order('referral_count', { ascending: false })
-      .limit(10);
-
-    if (error || !data) {
-      console.error('Leaderboard error:', error);
-      // Fallback: just show current user
+    if (!supabase) {
       const userName = this.getDisplayName();
       const userCount = this.getReferralCount();
       return userName ? [{ name: userName, count: userCount, isCurrentUser: true }] : [];
     }
 
-    const myCode = this.getReferralCode();
-    const leaderboard = data.map(row => ({
-      name: row.display_name,
-      count: row.referral_count,
-      isCurrentUser: row.referral_code === myCode
-    }));
+    try {
+      const { data, error } = await supabase
+        .from('players')
+        .select('display_name, referral_count, referral_code')
+        .not('display_name', 'is', null)
+        .gt('referral_count', 0)
+        .order('referral_count', { ascending: false })
+        .limit(10);
 
-    // If current user has a name but isn't in top 10, add them
-    const userName = this.getDisplayName();
-    if (userName && !leaderboard.find(e => e.isCurrentUser)) {
-      const userCount = this.getReferralCount();
-      leaderboard.push({ name: userName, count: userCount, isCurrentUser: true });
+      if (error || !data) {
+        console.error('Leaderboard error:', error);
+        const userName = this.getDisplayName();
+        const userCount = this.getReferralCount();
+        return userName ? [{ name: userName, count: userCount, isCurrentUser: true }] : [];
+      }
+
+      const myCode = this.getReferralCode();
+      const leaderboard = data.map(row => ({
+        name: row.display_name,
+        count: row.referral_count,
+        isCurrentUser: row.referral_code === myCode
+      }));
+
+      const userName = this.getDisplayName();
+      if (userName && !leaderboard.find(e => e.isCurrentUser)) {
+        const userCount = this.getReferralCount();
+        leaderboard.push({ name: userName, count: userCount, isCurrentUser: true });
+      }
+
+      return leaderboard;
+    } catch (e) {
+      console.error('getLeaderboard error:', e);
+      return [];
     }
-
-    return leaderboard;
   },
 
   // --- Referrer lookup (find who referred this user) ---
   async getReferrerByCode(code) {
-    const { data } = await supabase
-      .from('players')
-      .select('display_name')
-      .eq('referral_code', code)
-      .single();
-
-    return data ? data.display_name : null;
+    if (!supabase) return null;
+    try {
+      const { data } = await supabase
+        .from('players')
+        .select('display_name')
+        .eq('referral_code', code)
+        .single();
+      return data ? data.display_name : null;
+    } catch (e) {
+      return null;
+    }
   },
 
   // --- Refresh own data from Supabase ---
   async refreshFromServer() {
-    const deviceId = getDeviceId();
-    const { data } = await supabase
-      .from('players')
-      .select('*')
-      .eq('device_id', deviceId)
-      .single();
+    if (!supabase) return null;
+    try {
+      const deviceId = getDeviceId();
+      const { data } = await supabase
+        .from('players')
+        .select('*')
+        .eq('device_id', deviceId)
+        .single();
 
-    if (data) {
-      this._cache = data;
-      this._syncToLocal(data);
+      if (data) {
+        this._cache = data;
+        this._syncToLocal(data);
+      }
+      return data;
+    } catch (e) {
+      return null;
     }
-    return data;
   }
 };
 
